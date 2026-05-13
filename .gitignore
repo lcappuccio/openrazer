@@ -65,3 +65,5 @@ dist
 /driver/*.mod
 /driver/*.mod.c
 /driver/.*.cmd
+/daemon/build
+/daemon/openrazer_daemon.egg-info
