@@ -2382,7 +2382,7 @@ class RazerHuntsmanV3XTKL(_RippleKeyboard):
     """
     Class for the Razer Huntsman V3 X TKL
     """
-    EVENT_FILE_REGEX = re.compile(r'.*Razer_Huntsman_V3_X_TKL-if01-event-kbd')
+    EVENT_FILE_REGEX = re.compile(r'.*Razer_Huntsman_V3_X_Tenkeyless-if01-event-kbd')
 
     USB_VID = 0x1532
     USB_PID = 0x02B1
