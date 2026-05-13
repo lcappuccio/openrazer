@@ -8,6 +8,8 @@ import logging
 import math
 import threading
 import time
+import json
+import os
 
 # pylint: disable=import-error
 from openrazer_daemon.keyboard import KeyboardColour
@@ -35,6 +37,8 @@ class RippleEffectThread(threading.Thread):
         self._rows, self._cols = self._parent._parent.MATRIX_DIMS
 
         self._keyboard_grid = KeyboardColour(self._rows, self._cols)
+
+        self._base_colour = (0, 0, 0)
 
     @property
     def shutdown(self):
@@ -91,6 +95,26 @@ class RippleEffectThread(threading.Thread):
         self._refresh_rate = refresh_rate
         self._active = True
 
+        # Read base color from config if present
+        config_path = os.path.expanduser('~/.config/openrazer/ripple_base_color.json')
+        try:
+            with open(config_path) as f:
+                c = json.load(f)
+                if c.get('enabled') is False:
+                    self._base_colour = None
+                    self._logger.info("Ripple base colour disabled in config")
+                else:
+                    self._base_colour = (c['r'], c['g'], c['b'])
+                    self._logger.info("Ripple base colour loaded from config: %s",
+                                      self._base_colour)
+        except FileNotFoundError:
+            self._base_colour = (0, 0, 0)
+            self._logger.info("No ripple base colour config found, using black")
+        except Exception as e:
+            self._base_colour = (0, 0, 0)
+            self._logger.warning("Could not read ripple base colour config: %s",
+                                 e)
+
     def disable(self):
         """
         Disable the ripple effect
@@ -119,11 +143,11 @@ class RippleEffectThread(threading.Thread):
                 # Clear keyboard
                 self._keyboard_grid.reset_rows()
 
-                # Fill base color
-                base = (0, 255, 255)
-                for r in range(0, self._rows):
-                    for c in range(0, self._cols):
-                        self._keyboard_grid.set_key_colour(r, c, base)
+                # Fill base color if enabled
+                if self._base_colour is not None:
+                    for r in range(0, self._rows):
+                        for c in range(0, self._cols):
+                            self._keyboard_grid.set_key_colour(r, c, self._base_colour)
                 now = datetime.datetime.now()
                 radiuses = []
                 self._logger.debug("key_list length: %d", len(self.key_list))
