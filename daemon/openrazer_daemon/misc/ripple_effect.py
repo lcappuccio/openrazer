@@ -149,7 +149,6 @@ class RippleEffectThread(threading.Thread):
                         for c in range(0, self._cols):
                             self._keyboard_grid.set_key_colour(r, c, self._base_colour)
                 now = datetime.datetime.now()
-                radiuses = []
                 self._logger.debug("key_list length: %d", len(self.key_list))
 
                 radiuses = []

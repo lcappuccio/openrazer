@@ -10,9 +10,9 @@
 
 ## Overview
 
-The upstream OpenRazer PPA package (`openrazer-driver-dkms`) did not support the Huntsman V3 X TKL at the time of setup. Additionally, the upstream `razermouse` driver contained a regression that broke the Basilisk V3 scroll mode toggle button.
+The upstream OpenRazer PPA package (`openrazer-driver-dkms`) did not support the Huntsman V3 X TKL at the time of setup. Additionally, the upstream `razermouse` driver contained a regression that broke the Basilisk V3 scroll mode toggle button. The ripple effect also lacked a configurable base color, leaving the keyboard unlit between keypresses.
 
-Both fixes were implemented as patches on top of the upstream source, maintained in a personal fork:
+All fixes are implemented as patches on top of the upstream source, maintained in a personal fork:
 **https://github.com/lcappuccio/openrazer**
 
 ---
@@ -23,8 +23,12 @@ Both fixes were implemented as patches on top of the upstream source, maintained
 
 Files modified:
 - `driver/razerkbd_driver.h` — added `USB_DEVICE_ID_RAZER_HUNTSMAN_V3_X_TKL 0x02B1`
-- `driver/razerkbd_driver.c` — added device to all relevant switch cases and `CREATE_DEVICE_FILE` probe section, sharing the `BLACKWIDOW_V4_X` case but **without** `game_led_state`, `macro_led_state`, `macro_led_effect`, and `matrix_effect_wheel` (not supported by hardware)
-- `daemon/openrazer_daemon/hardware/keyboards.py` — added `RazerHuntsmanV3XTKL` class
+- `driver/razerkbd_driver.c` — added device to all relevant switch cases and `CREATE_DEVICE_FILE` probe section, with its own case (not sharing `BLACKWIDOW_V4_X`) and **without** `game_led_state`, `macro_led_state`, `macro_led_effect`, and `matrix_effect_wheel` (not supported by hardware)
+- `daemon/openrazer_daemon/hardware/keyboards.py` — added `RazerHuntsmanV3XTKL` class with correct `EVENT_FILE_REGEX`:
+  ```python
+  EVENT_FILE_REGEX = re.compile(r'.*Razer_Huntsman_V3_X_Tenkeyless-if01-event-kbd')
+  ```
+  Note: the regex must match the actual `/dev/input/by-id/` filename, which uses `Tenkeyless` not `TKL`. A wrong regex causes `No event files for KeyWatcher` and breaks the ripple effect.
 - `install_files/udev/99-razer.rules` — added `02b1` to the keyboards product ID list
 - `README.md` — added device entry
 
@@ -40,6 +44,27 @@ Files modified:
   - Added `scroll_toggle_worker()` function that calls `razer_chroma_misc_set_scroll_mode()` with toggled value
   - Added `INIT_WORK()` in `razer_mouse_init()`
   - In `razer_raw_event()`, intercept `REP4_SCROLL` and call `schedule_work()` instead of emitting a key event
+
+### 3. Ripple Effect Base Color (`ripple_effect.py`)
+
+**Problem**: The ripple effect leaves all non-rippling keys black, making the keyboard unlit unless a key is being pressed.
+
+**Fix**: `daemon/openrazer_daemon/misc/ripple_effect.py` reads a base color from a user config file and fills the keyboard matrix with it before applying the ripple overlay each frame.
+
+Config file: `~/.config/openrazer/ripple_base_color.json`
+
+```json
+{
+    "r": 0,
+    "g": 255,
+    "b": 255,
+    "enabled": true
+}
+```
+
+Set `"enabled": false` to revert to default black background without deleting the file.
+
+The config is read each time the ripple effect is enabled (i.e. when Polychromatic activates it), so changes take effect after restarting the daemon — no reinstall needed.
 
 ---
 
@@ -61,7 +86,7 @@ Log out and back in (or restart the user systemd session) for group changes to t
 
 ### udev Rules
 
-The stock `99-razer.rules` fires `razer_mount` on device `add` events. However, `razerkbd` may load after udev has processed the keyboard HID events, meaning permissions are never set for the keyboard at boot.
+The stock `99-razer.rules` fires `razer_mount` on device `add` events. However, `razerkbd` may load after udev has already processed the keyboard HID events, meaning permissions are never set for the keyboard at boot.
 
 Fix: add a bind-time udev rule in `/etc/udev/rules.d/` (survives package upgrades):
 
@@ -103,6 +128,8 @@ The install script handles this by copying the custom driver sources to the DKMS
 
 **Important**: The DKMS version directory changes on package upgrades (e.g. `3.12.0` → `3.12.2`). The install script detects this dynamically.
 
+**Important**: After a DKMS rebuild, stale uncompressed `.ko` files may remain alongside the new `.ko.zst` files and take precedence. The install script removes them explicitly.
+
 ---
 
 ## Install Script
@@ -120,34 +147,42 @@ cd /home/leo/Projects/openrazer
 ```
 
 The script:
-1. Copies custom driver sources to the DKMS tree
-2. Builds all kernel modules
-3. Installs `.ko.zst` modules (removing stale uncompressed `.ko` files)
-4. Runs `depmod`
-5. Reloads `razerkbd` and `razermouse` modules
-6. Reinstalls the daemon Python egg
-7. Fixes sysfs permissions via `razer_mount` and `chgrp`
-8. Restarts `openrazer-daemon`
-9. Patches Polychromatic device database if needed
-10. Initialises mouse scroll mode to tactile (0)
+1. Detects current DKMS version dynamically
+2. Copies custom driver sources to the DKMS tree
+3. Builds all kernel modules
+4. Installs `.ko.zst` modules, removing stale uncompressed `.ko` files
+5. Runs `depmod`
+6. Reloads `razerkbd` and `razermouse` modules
+7. Reinstalls the daemon Python egg
+8. Fixes sysfs permissions via `razer_mount` and `chgrp`
+9. Restarts `openrazer-daemon`
+10. Patches Polychromatic device database if needed
+11. Initialises mouse scroll mode to tactile (0)
 
 ---
 
-## Post-Reboot Recovery (if needed)
+## Permissions Fix Script
 
-If devices show as `?` in Polychromatic after reboot, run:
+Located at `/home/leo/Projects/openrazer/fix_razer_permissions.sh`.
+
+Run if devices show as `?` in Polychromatic after reboot or daemon restart:
 
 ```bash
+#!/bin/bash
+set -e
+
 for dev in /sys/bus/hid/drivers/razerkbd/0003:1532:*/; do
     sudo chgrp -R plugdev "$dev"
 done
+
 for id in $(ls /sys/bus/hid/drivers/razermouse/ | grep "1532:0099"); do
     sudo /usr/lib/udev/razer_mount razermouse "$id"
 done
+
 systemctl --user restart openrazer-daemon
 ```
 
-With the `/etc/udev/rules.d/99-razer-plugdev.rules` bind rule in place, this should no longer be necessary after reboot.
+With the `/etc/udev/rules.d/99-razer-plugdev.rules` bind rule in place, this should not be necessary on normal reboots.
 
 ---
 
@@ -160,7 +195,9 @@ With the `/etc/udev/rules.d/99-razer-plugdev.rules` bind rule in place, this sho
 
 ## Known Limitations
 
-- No lighting at the GDM login screen (daemon is a user service, starts after login)
+- No lighting at the GDM login screen — daemon is a user service, starts after login; devices have no onboard memory
 - Scroll wheel lighting zone (`matrix_effect_wheel`) not supported — hardware doesn't have it
 - Game mode and macro LEDs not exposed — hardware has the keys but no dedicated LEDs
 - Lighting settings do not persist across daemon restarts without Polychromatic applying them
+- Ripple base color change requires daemon restart to take effect
+- The entire setup must be reapplied after `openrazer-driver-dkms` package upgrades via `install_razer_drivers.sh`
