@@ -3,8 +3,8 @@
 ## Hardware
 - **Keyboard**: Razer Huntsman V3 X TKL (USB `1532:02B1`)
 - **Mouse**: Razer Basilisk V3 (USB `1532:0099`)
-- **OS**: Ubuntu 24.04
-- **Kernel**: 6.17.x (generic)
+- **OS**: Ubuntu 24.04 / Fedora 44
+- **Kernel**: 6.17.x (Ubuntu), 7.0.x (Fedora)
 
 ---
 
@@ -66,6 +66,18 @@ Set `"enabled": false` to revert to default black background without deleting th
 
 The config is read each time the ripple effect is enabled (i.e. when Polychromatic activates it), so changes take effect after restarting the daemon — no reinstall needed.
 
+### 4. Kernel 7.x Compatibility (`razerkbd`)
+
+The `hid_report_raw_event()` function signature changed in kernel 7.x — an extra `u32 size` parameter was added between `bufsize` and `interrupt`. Two calls in `razerkbd_driver.c` must be updated:
+
+```c
+// Before (kernel 6.x)
+hid_report_raw_event(hdev, HID_INPUT_REPORT, xdata, sizeof(xdata), 0);
+
+// After (kernel 7.x)
+hid_report_raw_event(hdev, HID_INPUT_REPORT, xdata, sizeof(xdata), 0, 0);
+```
+
 ---
 
 ## System-Level Setup
@@ -84,11 +96,16 @@ Log out and back in (or restart the user systemd session) for group changes to t
 - `plugdev` — required for openrazer daemon to access sysfs device files
 - `input` — required for openrazer daemon to open `/dev/input/` event files for keyboard
 
+**Fedora note**: The `plugdev` group does not exist by default on Fedora. Create it first:
+```bash
+sudo groupadd plugdev
+```
+
 ### udev Rules
 
 The stock `99-razer.rules` fires `razer_mount` on device `add` events. However, `razerkbd` may load after udev has already processed the keyboard HID events, meaning permissions are never set for the keyboard at boot.
 
-Fix: add a bind-time udev rule in `/etc/udev/rules.d/` (survives package upgrades):
+Fix: add a bind-time udev rule in `/etc/udev/rules.d/` (survives package upgrades, required on both Ubuntu and Fedora):
 
 ```bash
 sudo vi /etc/udev/rules.d/99-razer-plugdev.rules
@@ -126,9 +143,17 @@ The upstream `openrazer-driver-dkms` package manages the kernel modules via DKMS
 
 The install script handles this by copying the custom driver sources to the DKMS tree before building.
 
-**Important**: The DKMS version directory changes on package upgrades (e.g. `3.12.0` → `3.12.2`). The install script detects this dynamically.
+**Important**: The DKMS version directory changes on package upgrades (e.g. `3.12.0` → `3.12.3`). The install script detects this dynamically.
 
-**Important**: After a DKMS rebuild, stale uncompressed `.ko` files may remain alongside the new `.ko.zst` files and take precedence. The install script removes them explicitly.
+### Distro Differences
+
+| | Ubuntu | Fedora |
+|---|---|---|
+| Module install path | `/lib/modules/$KERNEL/updates/dkms/` | `/lib/modules/$KERNEL/extra/` |
+| Module compression | `.ko.zst` | uncompressed `.ko` |
+| Stale file issue | Stale `.ko` alongside `.ko.zst` | Stale `.ko.xz` alongside `.ko` |
+
+**Fedora note**: DKMS installs compressed `.ko.xz` files which fail to load with `Invalid argument`. The install script removes `.ko.xz` files and installs uncompressed `.ko` files instead.
 
 ---
 
@@ -150,14 +175,15 @@ The script:
 1. Detects current DKMS version dynamically
 2. Copies custom driver sources to the DKMS tree
 3. Builds all kernel modules
-4. Installs `.ko.zst` modules, removing stale uncompressed `.ko` files
-5. Runs `depmod`
-6. Reloads `razerkbd` and `razermouse` modules
-7. Reinstalls the daemon Python egg
-8. Fixes sysfs permissions via `razer_mount` and `chgrp`
-9. Restarts `openrazer-daemon`
-10. Patches Polychromatic device database if needed
-11. Initialises mouse scroll mode to tactile (0)
+4. Detects distro module path (Ubuntu vs Fedora) and installs accordingly
+5. Removes stale compressed/uncompressed duplicates
+6. Runs `depmod`
+7. Reloads `razerkbd` and `razermouse` modules
+8. Reinstalls the daemon Python egg
+9. Fixes sysfs permissions via `razer_mount` and `chgrp`
+10. Restarts `openrazer-daemon`
+11. Patches Polychromatic device database if needed
+12. Initialises mouse scroll mode to tactile (0)
 
 ---
 
@@ -195,7 +221,7 @@ With the `/etc/udev/rules.d/99-razer-plugdev.rules` bind rule in place, this sho
 
 ## Known Limitations
 
-- No lighting at the GDM login screen — daemon is a user service, starts after login; devices have no onboard memory
+- No lighting at the GDM/SDDM login screen — daemon is a user service, starts after login; devices have no onboard memory
 - Scroll wheel lighting zone (`matrix_effect_wheel`) not supported — hardware doesn't have it
 - Game mode and macro LEDs not exposed — hardware has the keys but no dedicated LEDs
 - Lighting settings do not persist across daemon restarts without Polychromatic applying them

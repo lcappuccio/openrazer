@@ -14,12 +14,28 @@ make driver
 
 echo ":: Installing modules"
 cd driver
-zstd -f razerkbd.ko -o razerkbd.ko.zst
-zstd -f razermouse.ko -o razermouse.ko.zst
-sudo rm -f /lib/modules/$KERNEL/updates/dkms/razerkbd.ko
-sudo rm -f /lib/modules/$KERNEL/updates/dkms/razermouse.ko
-sudo cp razerkbd.ko.zst /lib/modules/$KERNEL/updates/dkms/razerkbd.ko.zst
-sudo cp razermouse.ko.zst /lib/modules/$KERNEL/updates/dkms/razermouse.ko.zst
+
+# Detect module install path
+if [ -d "/lib/modules/$KERNEL/updates/dkms" ]; then
+    MOD_DIR="/lib/modules/$KERNEL/updates/dkms"
+    echo ":: Module dir: $MOD_DIR (Ubuntu/zstd)"
+    for mod in razerkbd razermouse; do
+        zstd -f ${mod}.ko -o ${mod}.ko.zst
+        sudo rm -f $MOD_DIR/${mod}.ko $MOD_DIR/${mod}.ko.zst
+        sudo cp ${mod}.ko.zst $MOD_DIR/${mod}.ko.zst
+    done
+elif [ -d "/lib/modules/$KERNEL/extra" ]; then
+    MOD_DIR="/lib/modules/$KERNEL/extra"
+    echo ":: Module dir: $MOD_DIR (Fedora/uncompressed)"
+    for mod in razerkbd razermouse; do
+        sudo rm -f $MOD_DIR/${mod}.ko $MOD_DIR/${mod}.ko.xz $MOD_DIR/${mod}.ko.zst
+        sudo cp ${mod}.ko $MOD_DIR/${mod}.ko
+    done
+else
+    echo "ERROR: Cannot find module install directory"
+    exit 1
+fi
+
 cd ..
 
 echo ":: Updating module deps"

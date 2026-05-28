@@ -4856,11 +4856,11 @@ static int razer_raw_event_bitfield(struct hid_device *hdev, struct razer_kbd_us
 
                             // report key down
                             xdata[1] = cur_value;
-                            hid_report_raw_event(hdev, HID_INPUT_REPORT, xdata, sizeof(xdata), 0);
+                            hid_report_raw_event(hdev, HID_INPUT_REPORT, xdata, sizeof(xdata), 0, 0);
 
                             // report key up
                             xdata[1] = 0x00;
-                            hid_report_raw_event(hdev, HID_INPUT_REPORT, xdata, sizeof(xdata), 0);
+                            hid_report_raw_event(hdev, HID_INPUT_REPORT, xdata, sizeof(xdata), 0, 0);
                         }
                     }
                 }
